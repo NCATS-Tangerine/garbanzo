@@ -3,19 +3,20 @@ from itertools import chain
 import requests
 from flask import Flask, request, jsonify
 from flask_restplus import abort, Api, Resource, fields
-
+from utils import CurieUtil, curie_map, execute_sparql_query, execute_sparql_queryc
 from lookup import getConcept, get_equiv_item, getEntitiesCurieClaims, get_forward_items, get_reverse_items, \
     search_wikidata, get_concept_details
 
 app = Flask(__name__)
-description = """A SPARQL/Wikidata Query API wrapper for Translator
+description = """A SPARQL/chem2bio2rdf Query API wrapper for Translator
 
 Implements a Knowedge Beacon for the Translator Knowledge Beacon API
 (http://beacon.medgeninformatics.net/api/swagger-ui.html) version 1.0.11
 
 """
-api = Api(app, version='1.0.112', title='Garbanzo API', description=description,
-          contact_url="https://github.com/stuppie/garbanzo", contact="gstupp", contact_email="gstupp@scripps.edu")
+api = Api(app, version='0.0.1', title='Chem2Bio2RDF API', description=description,
+          contact_url="https://github.com/stevencox/pinto", contact="stevencox", contact_email="scox@renci.org")
+
 concepts_ns = api.namespace('concepts', "Queries for concepts")
 exactmatches_ns = api.namespace('exactmatches', "Queries for exactly matching concepts")
 statements_ns = api.namespace('statements', "Queries for concept-relationship statements")
@@ -25,8 +26,8 @@ evidence_ns = api.namespace('evidence', "Queries for references cited as evidenc
 @app.route("/swagger_smartapi.json")
 def get_modified_swagger():
     d = api.__schema__
-    d['info']['contact']['responsibleOrganization'] = 'TSRI'
-    d['info']['contact']['responsibleDeveloper'] = 'gss'
+    d['info']['contact']['responsibleOrganization'] = 'RENCI'
+    d['info']['contact']['responsibleDeveloper'] = 'scox'
     return jsonify(d)
 
 ##########
@@ -39,41 +40,43 @@ concept_detail = api.model("concept_detail", {
 })
 
 concept_model = api.model('concept_model', {
-    'id': fields.String(required=True, description="local object identifier for the concept", example="wd:Q14883734"),
-    'name': fields.String(required=True, description="canonical human readable name of the concept (aka label)",
-                          example="WRN"),
+    'id': fields.String(required=True, description="local object identifier for the concept", example="mesh:D052638"),
+    'name': fields.String(required=True, description="canonical human readable name of the concept (aka label)", example="Chemicals"),
     'semanticGroup': fields.String(required=False, description="concept semantic type"),
     'synonyms': fields.List(fields.String(), required=False, description="aka aliases",
-                            example=['RECQ3', 'Werner syndrome RecQ like helicase']),
+                            example=['...todo...', 'Werner syndrome RecQ like helicase']),
     'definition': fields.String(required=True, description="concept definition (aka description)",
                                 example="gene of the species Homo sapiens"),
     'details': fields.List(fields.Nested(concept_detail, required=False), required=False)
 })
 
 concepts_model = api.model('concepts_model', {
-    'id': fields.String(required=True, description="local object identifier for the concept", example="wd:Q14883734"),
-    'name': fields.String(required=True, description="canonical human readable name of the concept (aka label)",
-                          example="WRN"),
+    'id': fields.String(required=True, description="local object identifier for the concept", example="mesh:D052638", default='x'),
+    'name': fields.String(required=True, description="canonical human readable name of the concept (aka label)", example="Chemicals", default='x'),
     'semanticGroup': fields.String(required=False, description="concept semantic type"),
     'synonyms': fields.List(fields.String(), required=False, description="aka aliases",
-                            example=['RECQ3', 'Werner syndrome RecQ like helicase']),
+                            example=['...todo...', 'Werner syndrome RecQ like helicase']),
     'definition': fields.String(required=True, description="concept definition (aka description)",
                                 example="gene of the species Homo sapiens"),
 })
 
 
 @concepts_ns.route('/<conceptId>')
-@concepts_ns.param('conceptId', 'Wikidata entity curie', default="wd:Q18557952")
+@concepts_ns.param('conceptId', 'chem2bio2rdf concept', default="aspirin")
 class GetConcept(Resource):
-    @api.marshal_with(concept_model)
+#    @api.marshal_with(concept_model)
     def get(self, conceptId):
         """
         Retrieves details for a specified concept in Wikidata
         """
-        concept = getConcept(conceptId)
-        details = get_concept_details(conceptId)
-        concept['details'] = details
-        return concept
+        c = getConcept(conceptId)
+        print ("---------------> {}".format (c))
+        return c
+
+#        concept = getConcept(conceptId)
+#        details = get_concept_details(conceptId)
+#        concept['details'] = details
+#        return concept
 
 
 ##########
@@ -82,17 +85,15 @@ class GetConcept(Resource):
 
 @concepts_ns.route('/')
 @concepts_ns.param('keywords',
-                     'space delimited set of keywords or substrings against which to match concept names and synonyms',
-                     default='night blindness', required=True)
+                   'space delimited set of keywords or substrings against which to match concept names and synonyms',
+                   default='night blindness', required=True)
 @concepts_ns.param('semgroups',
-                     'space-delimited set of semantic groups to which to constrain concepts matched by the main keyword search',
-                     default='DISO CHEM')
-@concepts_ns.param('pageNumber', '(1-based) number of the page to be returned in a paged set of query results',
-                     default=1, type=int)
-@concepts_ns.param('pageSize', 'number of concepts per page to be returned in a paged set of query results',
-                     default=10, type=int)
+                   'space-delimited set of semantic groups to which to constrain concepts matched by the main keyword search',
+                   default='DISO CHEM')
+@concepts_ns.param('pageNumber', '(1-based) number of the page to be returned in a paged set of query results', default=1, type=int)
+@concepts_ns.param('pageSize', 'number of concepts per page to be returned in a paged set of query results', default=10, type=int)
 class GetConcepts(Resource):
-    @api.marshal_with(concepts_model)
+#    @api.marshal_with(concepts_model)
     def get(self):
         """
         Retrieves a (paged) list of concepts in Wikidata
@@ -105,10 +106,24 @@ class GetConcepts(Resource):
         if pageSize > 50:
             abort(message="pageSize can not be greater than 50")
 
-        dataPage = search_wikidata(keywords, semgroups=semgroups, pageNumber=pageNumber, pageSize=pageSize)
+#        dataPage = search_wikidata(keywords, semgroups=semgroups, pageNumber=pageNumber, pageSize=pageSize)
+#        return dataPage
 
-        return dataPage
+        #dataPage = search_wikidata(keywords, semgroups=semgroups, pageNumber=pageNumber, pageSize=pageSize)
+        return getConcept (qid=None)
 
+        '''
+        {
+            "wd:Q24301599": {
+                "id": "wd:Q24301599",
+                "name": "Night blindness-associated mutations in the ligand-binding, cysteine-rich, and intracellular ...",
+                "definition": "scientific article",
+                "synonyms": [],
+                "semanticGroup": "sadfasdf",
+                "details": []
+            }
+        }
+        '''
 
 ##########
 # GET /exactmatches
@@ -306,4 +321,4 @@ class GetEvidence(Resource):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0')
+    app.run(host='0.0.0.0', debug=True)

@@ -251,3 +251,23 @@ def execute_sparql_query(query, prefix=None, endpoint='https://query.wikidata.or
     response = requests.get(endpoint, params=params, headers=headers)
     response.raise_for_status()
     return response.json()
+
+def execute_sparql_queryc(query, prefix=None, endpoint='http://stars-blazegraph.renci.org/bigdata/sparql',
+                         user_agent='--- beacon ---'):
+    c2b2r_standard_prefix = '''
+    prefix kegg:      <http://chem2bio2rdf.org/kegg/resource/>
+    prefix pharmgkb:  <http://chem2bio2rdf.org/pharmgkb/resource/>
+    prefix drugbank:  <http://chem2bio2rdf.org/drugbank/resource/>
+    prefix pubchem:   <http://chem2bio2rdf.org/pubchem/resource/>
+    prefix ctd:       <http://chem2bio2rdf.org/ctd/resource/>
+    prefix mesh:      <http://bio2rdf.org/mesh:>
+    '''
+    if not prefix:
+        prefix = c2b2r_standard_prefix
+    params = {'query': prefix + '\n' + query,
+              'format': 'json'}
+    headers = {'Accept': 'application/sparql-results+json',
+               'User-Agent': user_agent}
+    response = requests.get(endpoint, params=params, headers=headers)
+    response.raise_for_status()
+    return response.json()

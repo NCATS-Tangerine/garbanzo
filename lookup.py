@@ -1,11 +1,13 @@
 from itertools import chain
 from pprint import pprint
 
+from string import Template
+import json
 from cachetools import cached, TTLCache
 import requests
 
 from utils import prop_curie, CurieUtil, curie_map, execute_sparql_query, always_curie, always_qid, \
-    get_types_from_qids
+    get_types_from_qids, execute_sparql_queryc
 
 cu = CurieUtil(curie_map)
 CACHE_SIZE = 99999
@@ -167,10 +169,35 @@ def getConceptLabels(qids):
     wd = r.json()['entities']
     return {k: v['labels']['en']['value'] for k, v in wd.items()}
 
-
 def getConcept(qid):
-    return getConcepts((qid,))[always_curie(qid)]
+    return getConcepts(qid)
+#    return getConcepts((qid,))[always_curie(qid)]
 
+
+def package_val (b):
+    return {
+        'id' : b['pubchemCID']['value'].replace ("http://chem2bio2rdf.org/pubchem/resource/pubchem_compound/", "pubchem_comp:"),
+        'name' : '.......',
+        'definition' : '.......',
+        'synonyms' : '.....',
+        'semanticGroup' : 'CHEM',
+        'details' : '.....'
+    }
+
+def getConceptsC (qids):
+    result = None
+    if qids == None or qids == '':
+        sparql = """select distinct ?pubchemCID where { ?pubchemCID pubchem:synonyms ?synonyms . filter regex(str(?synonyms), "${search}", "i") }"""
+        query = Template (sparql).substitute (search = qids)
+        result = execute_sparql_queryc (query)
+        result = { qids : list(map (package_val, result['results']['bindings'])) }       
+    else:
+        sparql = """select distinct ?pubchemCID where { ?pubchemCID pubchem:synonyms ?synonyms . filter regex(str(?synonyms), "${search}", "i") }"""
+        query = Template (sparql).substitute (search = qids)
+        result = execute_sparql_queryc (query)
+        result = { qids : list(map (package_val, result['results']['bindings'])) }
+    print (result)
+    return result
 
 @cached(TTLCache(10000, 300))  # expire after 5 min
 def getConcepts(qids):
@@ -180,6 +207,10 @@ def getConcepts(qids):
     :param qids:
     :return:
     """
+    if qids == 'aspirin' or qids == '' or qids == None:
+        return getConceptsC (qids)
+
+
     entities = getEntities(qids)
 
     dd = dict()
